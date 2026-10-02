@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Zero Cross Online</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #38bdf8;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --x-color: #f43f5e;
+      --o-color: #38bdf8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    
+    .container { background: var(--card-bg); width: 100%; max-width: 400px; border-radius: 16px; padding: 20px; border: 1px solid var(--border); box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
+    h1 { font-size: 1.5rem; text-align: center; margin-bottom: 15px; color: var(--text); }
+    
+    .status-badge { text-align: center; padding: 10px; border-radius: 8px; background: rgba(56, 189, 248, 0.1); color: var(--accent); font-weight: 600; font-size: 0.9rem; margin-bottom: 15px; border: 1px solid rgba(56, 189, 248, 0.2); }
+    
+    .connection-panel { background: #0f172a; padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid var(--border); }
+    .group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .group:last-child { margin-bottom: 0; }
+    label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .row { display: flex; gap: 8px; }
+    input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #1e293b; color: var(--text); font-size: 0.9rem; outline: none; }
+    input:focus { border-color: var(--accent); }
+    
+    button { padding: 10px 16px; border-radius: 8px; border: none; background: var(--accent); color: #0f172a; font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    
+    .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; aspect-ratio: 1; }
+    .cell { background: #0f172a; border-radius: 12px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 2.5rem; font-weight: 800; cursor: pointer; transition: background 0.2s; user-select: none; }
+    .cell:hover:not(.taken) { background: #1e293b; }
+    .cell.x { color: var(--x-color); }
+    .cell.o { color: var(--o-color); }
+    
+    .actions { display: flex; justify-content: center; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Zero Cross Online</h1>
+    
+    <div id="status" class="status-badge">Initializing PeerJS...</div>
+
+    <div class="connection-panel">
+      <div class="group">
+        <label>Your Room Code</label>
+        <div class="row">
+          <input type="text" id="my-id" readonly placeholder="Generating code...">
+          <button class="btn-secondary" onclick="copyCode()">Copy</button>
+        </div>
+      </div>
+      
+      <div class="group">
+        <label>Join Friend</label>
+        <div class="row">
+          <input type="text" id="join-id" placeholder="Enter Friend Code">
+          <button id="join-btn" onclick="connectToPeer()">Join</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="board" id="board">
+      <div class="cell" data-index="0"></div>
+      <div class="cell" data-index="1"></div>
+      <div class="cell" data-index="2"></div>
+      <div class="cell" data-index="3"></div>
+      <div class="cell" data-index="4"></div>
+      <div class="cell" data-index="5"></div>
+      <div class="cell" data-index="6"></div>
+      <div class="cell" data-index="7"></div>
+      <div class="cell" data-index="8"></div>
+    </div>
+
+    <div class="actions">
+      <button id="reset-btn" onclick="requestRestart()" disabled>Restart Game</button>
+    </div>
+  </div>
+
+  <script>
+    let peer = null;
+    let conn = null;
+    let mySymbol = null; 
+    let currentTurn = 'X';
+    let gameState = Array(9).fill('');
+    let gameActive = false;
+
+    const statusEl = document.getElementById('status');
+    const myIdEl = document.getElementById('my-id');
+    const joinIdEl = document.getElementById('join-id');
+    const joinBtn = document.getElementById('join-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const cells = document.querySelectorAll('.cell');
+
+    const winCombos = [
+      [0,1,2], [3,4,5], [6,7,8],
+      [0,3,6], [1,4,7], [2,5,8],
+      [0,4,8], [2,4,6]
+    ];
+
+    function initPeer() {
+      const randomCode = 'zc-' + Math.floor(100000 + Math.random() * 900000);
+      peer = new Peer(randomCode);
+
+      peer.on('open', (id) => {
+        myIdEl.value = id;
+        statusEl.innerText = "Share your room code or join a friend!";
+      });
+
+      peer.on('connection', (connection) => {
+        conn = connection;
+        mySymbol = 'X';
+        setupConnection();
+        statusEl.innerText = "Connected! Your Turn (X)";
+        gameActive = true;
+        resetGame();
+      });
+
+      peer.on('error', (err) => {
+        statusEl.innerText = "Error: " + err.type;
+      });
+    }
+
+    function connectToPeer() {
+      const targetId = joinIdEl.value.trim();
+      if (!targetId) return;
+
+      statusEl.innerText = "Connecting...";
+      conn = peer.connect(targetId);
+      mySymbol = 'O';
+      setupConnection();
+    }
+
+    function setupConnection() {
+      conn.on('open', () => {
+        if (mySymbol === 'O') {
+          statusEl.innerText = "Connected! Friend's Turn (X)";
+          gameActive = true;
+          resetGame();
+        }
+        resetBtn.disabled = false;
+        joinBtn.disabled = true;
+      });
+
+      conn.on('data', (data) => {
+        if (data.type === 'MOVE') {
+          makeMove(data.index, data.symbol, false);
+        } else if (data.type === 'RESTART') {
+          resetGame();
+          statusEl.innerText = currentTurn === mySymbol ? "Game reset. Your turn!" : "Game reset. Friend's turn.";
+        }
+      });
+
+      conn.on('close', () => {
+        statusEl.innerText = "Friend disconnected.";
+        gameActive = false;
+        resetBtn.disabled = true;
+        joinBtn.disabled = false;
+      });
+    }
+
+    cells.forEach(cell => {
+      cell.addEventListener('click', () => {
+        const index = parseInt(cell.getAttribute('data-index'));
+        if (!gameActive || gameState[index] !== '' || currentTurn !== mySymbol) return;
+
+        makeMove(index, mySymbol, true);
+      });
+    });
+
+    function makeMove(index, symbol, isLocal) {
+      gameState[index] = symbol;
+      const cell = cells[index];
+      cell.innerText = symbol;
+      cell.classList.add(symbol.toLowerCase(), 'taken');
+
+      if (isLocal && conn) {
+        conn.send({ type: 'MOVE', index: index, symbol: symbol });
+      }
+
+      if (checkWin(symbol)) {
+        statusEl.innerText = isLocal ? "🎉 You Won!" : "😞 Friend Won!";
+        gameActive = false;
+        return;
+      }
+
+      if (gameState.every(c => c !== '')) {
+        statusEl.innerText = "🤝 It's a Draw!";
+        gameActive = false;
+        return;
+      }
+
+      currentTurn = symbol === 'X' ? 'O' : 'X';
+      if (gameActive) {
+        statusEl.innerText = currentTurn === mySymbol ? `Your Turn (${mySymbol})` : `Friend's Turn (${currentTurn})`;
+      }
+    }
+
+    function checkWin(symbol) {
+      return winCombos.some(combo => combo.every(idx => gameState[idx] === symbol));
+    }
+
+    function requestRestart() {
+      resetGame();
+      if (conn) conn.send({ type: 'RESTART' });
+      statusEl.innerText = currentTurn === mySymbol ? `Your Turn (${mySymbol})` : `Friend's Turn (${currentTurn})`;
+    }
+
+    function resetGame() {
+      gameState = Array(9).fill('');
+      currentTurn = 'X';
+      gameActive = true;
+      cells.forEach(cell => {
+        cell.innerText = '';
+        cell.className = 'cell';
+      });
+    }
+
+    function copyCode() {
+      if (!myIdEl.value) return;
+      navigator.clipboard.writeText(myIdEl.value);
+      alert("Room code copied to clipboard!");
+    }
+
+    initPeer();
+  </script>
+</body>
+</html>
